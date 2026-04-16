@@ -1,6 +1,7 @@
 # Cache Controller FSM Simulation
 
 This project implements a Finite State Machine (FSM) based cache controller in C++. It simulates a direct-mapped cache using a write-back policy.
+The simulator models a direct-mapped, write-back, write-allocate cache controller with the FSM states IDLE, COMPARE_TAG, WRITE_BACK, and ALLOCATE.
 
 ## Features
 - FSM-based cache controller
