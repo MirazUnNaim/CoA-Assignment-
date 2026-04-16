@@ -1,0 +1,1075 @@
+
+======================================================================
+  Cache Controller FSM Simulation
+  Based on Patterson & Hennessy RISC-V Edition, Section 5.9
+----------------------------------------------------------------------
+  Cache Config:
+    Policy      : Direct-Mapped, Write-Back, Write-Allocate
+    Block Size  : 4 words = 16 bytes
+    Cache Size  : 1024 blocks (16 KB)
+    Address     : 32-bit BYTE-addressed
+    Addr Layout : [TAG=18b | INDEX=10b | OFFSET=4b]
+    Offset Split: [WORD_OFFSET=2b | BYTE_OFFSET=2b]
+    Mem Latency : 4 cycles
+======================================================================
+
+
+######################################################################
+  SCENARIO : S1: Cold-Start Read Misses
+  PURPOSE  : Three reads to different byte addresses in same block. Shows ALLOCATE path.
+######################################################################
+
+======================================================================
+  Request #1 : READ  addr=0x00000000
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000000 (0)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 0
+    Word Offset      : 0
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=0  dirty=0  tag=0xffffffff
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=0  tag_in_cache=0xffffffff  req_tag=0x0  -> MISS
+    Action  : CACHE MISS — CPU stalled
+    Signals : cache_hit=0, cpu_stall=1
+    Branch  : Old block is CLEAN (or invalid) → go to ALLOCATE
+  ------------------------------------------------------------------
+  Cycle 3-6 | ALLOCATE
+    Action  : Fetching new block from memory
+    Signals : mem_read=1, cpu_stall=1
+    Fetch   : block base addr=0x0
+    Cycle 3 : memory_not_ready
+    Cycle 4 : memory_not_ready
+    Cycle 5 : memory_not_ready
+    Cycle 6 : memory_ready=1 — allocation complete
+    Loaded  : [0, 10, 20, 30]
+  ------------------------------------------------------------------
+  Cycle 7 | ALLOCATE -> COMPARE_TAG
+    Action  : Re-evaluating after allocation
+    Action  : READ data from newly fetched block
+    Signals : set_valid=1, set_tag=1
+    Data    : word[0] = 0
+  Cycle 8 | COMPARE_TAG -> IDLE
+    Action  : Request complete, CPU unstalled
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : MISS  |  cycles=8  |  read_data=0  |  mem_read=1  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #2 : READ  addr=0x00000004
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000004 (4)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 4
+    Word Offset      : 1
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=1  dirty=0  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x0  -> HIT
+    Action  : READ HIT — returning word from cache
+    Signals : cache_hit=1, cache_ready=1
+    Data    : word[1] = 10
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=10  |  mem_read=0  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #3 : READ  addr=0x00000008
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000008 (8)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 8
+    Word Offset      : 2
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=1  dirty=0  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x0  -> HIT
+    Action  : READ HIT — returning word from cache
+    Signals : cache_hit=1, cache_ready=1
+    Data    : word[2] = 20
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=20  |  mem_read=0  |  mem_write=0
+======================================================================
+
+**********************************************************************
+  PERFORMANCE STATISTICS
+**********************************************************************
+  Total Requests   : 3
+  Cache Hits       : 2
+  Cache Misses     : 1
+  Write-Backs      : 0
+  Hit  Rate        : 66.7%
+  Miss Rate        : 33.3%
+  Total Cycles     : 14
+  Avg Cycles/Req   : 4.7
+**********************************************************************
+
+
+######################################################################
+  SCENARIO : S2: Temporal Locality
+  PURPOSE  : Read same byte address twice, then different words in same block.
+######################################################################
+
+======================================================================
+  Request #1 : READ  addr=0x00000000
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000000 (0)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 0
+    Word Offset      : 0
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=0  dirty=0  tag=0xffffffff
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=0  tag_in_cache=0xffffffff  req_tag=0x0  -> MISS
+    Action  : CACHE MISS — CPU stalled
+    Signals : cache_hit=0, cpu_stall=1
+    Branch  : Old block is CLEAN (or invalid) → go to ALLOCATE
+  ------------------------------------------------------------------
+  Cycle 3-6 | ALLOCATE
+    Action  : Fetching new block from memory
+    Signals : mem_read=1, cpu_stall=1
+    Fetch   : block base addr=0x0
+    Cycle 3 : memory_not_ready
+    Cycle 4 : memory_not_ready
+    Cycle 5 : memory_not_ready
+    Cycle 6 : memory_ready=1 — allocation complete
+    Loaded  : [0, 10, 20, 30]
+  ------------------------------------------------------------------
+  Cycle 7 | ALLOCATE -> COMPARE_TAG
+    Action  : Re-evaluating after allocation
+    Action  : READ data from newly fetched block
+    Signals : set_valid=1, set_tag=1
+    Data    : word[0] = 0
+  Cycle 8 | COMPARE_TAG -> IDLE
+    Action  : Request complete, CPU unstalled
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : MISS  |  cycles=8  |  read_data=0  |  mem_read=1  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #2 : READ  addr=0x00000000
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000000 (0)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 0
+    Word Offset      : 0
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=1  dirty=0  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x0  -> HIT
+    Action  : READ HIT — returning word from cache
+    Signals : cache_hit=1, cache_ready=1
+    Data    : word[0] = 0
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=0  |  mem_read=0  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #3 : READ  addr=0x00000004
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000004 (4)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 4
+    Word Offset      : 1
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=1  dirty=0  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x0  -> HIT
+    Action  : READ HIT — returning word from cache
+    Signals : cache_hit=1, cache_ready=1
+    Data    : word[1] = 10
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=10  |  mem_read=0  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #4 : READ  addr=0x00000008
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000008 (8)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 8
+    Word Offset      : 2
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=1  dirty=0  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x0  -> HIT
+    Action  : READ HIT — returning word from cache
+    Signals : cache_hit=1, cache_ready=1
+    Data    : word[2] = 20
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=20  |  mem_read=0  |  mem_write=0
+======================================================================
+
+**********************************************************************
+  PERFORMANCE STATISTICS
+**********************************************************************
+  Total Requests   : 4
+  Cache Hits       : 3
+  Cache Misses     : 1
+  Write-Backs      : 0
+  Hit  Rate        : 75.0%
+  Miss Rate        : 25.0%
+  Total Cycles     : 17
+  Avg Cycles/Req   : 4.2
+**********************************************************************
+
+
+######################################################################
+  SCENARIO : S3: Write Hit (Dirty Bit)
+  PURPOSE  : Load block, then write to same block. Tests dirty bit.
+######################################################################
+
+======================================================================
+  Request #1 : READ  addr=0x00000000
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000000 (0)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 0
+    Word Offset      : 0
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=0  dirty=0  tag=0xffffffff
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=0  tag_in_cache=0xffffffff  req_tag=0x0  -> MISS
+    Action  : CACHE MISS — CPU stalled
+    Signals : cache_hit=0, cpu_stall=1
+    Branch  : Old block is CLEAN (or invalid) → go to ALLOCATE
+  ------------------------------------------------------------------
+  Cycle 3-6 | ALLOCATE
+    Action  : Fetching new block from memory
+    Signals : mem_read=1, cpu_stall=1
+    Fetch   : block base addr=0x0
+    Cycle 3 : memory_not_ready
+    Cycle 4 : memory_not_ready
+    Cycle 5 : memory_not_ready
+    Cycle 6 : memory_ready=1 — allocation complete
+    Loaded  : [0, 10, 20, 30]
+  ------------------------------------------------------------------
+  Cycle 7 | ALLOCATE -> COMPARE_TAG
+    Action  : Re-evaluating after allocation
+    Action  : READ data from newly fetched block
+    Signals : set_valid=1, set_tag=1
+    Data    : word[0] = 0
+  Cycle 8 | COMPARE_TAG -> IDLE
+    Action  : Request complete, CPU unstalled
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : MISS  |  cycles=8  |  read_data=0  |  mem_read=1  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #2 : WRITE addr=0x00000000 data=999
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000000 (0)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 0
+    Word Offset      : 0
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=1  dirty=0  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x0  -> HIT
+    Action  : WRITE HIT — updating cache word, marking dirty
+    Signals : cache_hit=1, cache_ready=1, dirty=1
+    Data    : word[0] 0 -> 999
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=0  |  mem_read=0  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #3 : READ  addr=0x00000000
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000000 (0)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 0
+    Word Offset      : 0
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=1  dirty=1  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x0  -> HIT
+    Action  : READ HIT — returning word from cache
+    Signals : cache_hit=1, cache_ready=1
+    Data    : word[0] = 999
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=999  |  mem_read=0  |  mem_write=0
+======================================================================
+
+**********************************************************************
+  PERFORMANCE STATISTICS
+**********************************************************************
+  Total Requests   : 3
+  Cache Hits       : 2
+  Cache Misses     : 1
+  Write-Backs      : 0
+  Hit  Rate        : 66.7%
+  Miss Rate        : 33.3%
+  Total Cycles     : 14
+  Avg Cycles/Req   : 4.7
+**********************************************************************
+
+
+######################################################################
+  SCENARIO : S4: Write Miss (Write-Allocate)
+  PURPOSE  : Write to empty cache. Tests write-allocate policy.
+######################################################################
+
+======================================================================
+  Request #1 : WRITE addr=0x00000020 data=777
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000020 (32)
+    Tag              : 0x0 (0)
+    Index            : 2
+    Byte Offset      : 0
+    Word Offset      : 0
+    Block Base Addr  : 0x20
+  Cache line state before request:
+    valid=0  dirty=0  tag=0xffffffff
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=0  tag_in_cache=0xffffffff  req_tag=0x0  -> MISS
+    Action  : CACHE MISS — CPU stalled
+    Signals : cache_hit=0, cpu_stall=1
+    Branch  : Old block is CLEAN (or invalid) → go to ALLOCATE
+  ------------------------------------------------------------------
+  Cycle 3-6 | ALLOCATE
+    Action  : Fetching new block from memory
+    Signals : mem_read=1, cpu_stall=1
+    Fetch   : block base addr=0x20
+    Cycle 3 : memory_not_ready
+    Cycle 4 : memory_not_ready
+    Cycle 5 : memory_not_ready
+    Cycle 6 : memory_ready=1 — allocation complete
+    Loaded  : [80, 90, 100, 110]
+  ------------------------------------------------------------------
+  Cycle 7 | ALLOCATE -> COMPARE_TAG
+    Action  : Re-evaluating after allocation
+    Action  : WRITE applied to newly fetched block
+    Signals : set_valid=1, set_tag=1, set_dirty=1
+    Data    : word[0] = 777
+  Cycle 8 | COMPARE_TAG -> IDLE
+    Action  : Request complete, CPU unstalled
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : MISS  |  cycles=8  |  read_data=0  |  mem_read=1  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #2 : READ  addr=0x00000020
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000020 (32)
+    Tag              : 0x0 (0)
+    Index            : 2
+    Byte Offset      : 0
+    Word Offset      : 0
+    Block Base Addr  : 0x20
+  Cache line state before request:
+    valid=1  dirty=1  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x0  -> HIT
+    Action  : READ HIT — returning word from cache
+    Signals : cache_hit=1, cache_ready=1
+    Data    : word[0] = 777
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=777  |  mem_read=0  |  mem_write=0
+======================================================================
+
+**********************************************************************
+  PERFORMANCE STATISTICS
+**********************************************************************
+  Total Requests   : 2
+  Cache Hits       : 1
+  Cache Misses     : 1
+  Write-Backs      : 0
+  Hit  Rate        : 50.0%
+  Miss Rate        : 50.0%
+  Total Cycles     : 11
+  Avg Cycles/Req   : 5.5
+**********************************************************************
+
+
+######################################################################
+  SCENARIO : S5: Dirty Block Eviction (Write-Back)
+  PURPOSE  : Write to index 0, then conflicting address. Tests WRITE_BACK path.
+######################################################################
+
+======================================================================
+  Request #1 : WRITE addr=0x00000000 data=100
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000000 (0)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 0
+    Word Offset      : 0
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=0  dirty=0  tag=0xffffffff
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=0  tag_in_cache=0xffffffff  req_tag=0x0  -> MISS
+    Action  : CACHE MISS — CPU stalled
+    Signals : cache_hit=0, cpu_stall=1
+    Branch  : Old block is CLEAN (or invalid) → go to ALLOCATE
+  ------------------------------------------------------------------
+  Cycle 3-6 | ALLOCATE
+    Action  : Fetching new block from memory
+    Signals : mem_read=1, cpu_stall=1
+    Fetch   : block base addr=0x0
+    Cycle 3 : memory_not_ready
+    Cycle 4 : memory_not_ready
+    Cycle 5 : memory_not_ready
+    Cycle 6 : memory_ready=1 — allocation complete
+    Loaded  : [0, 10, 20, 30]
+  ------------------------------------------------------------------
+  Cycle 7 | ALLOCATE -> COMPARE_TAG
+    Action  : Re-evaluating after allocation
+    Action  : WRITE applied to newly fetched block
+    Signals : set_valid=1, set_tag=1, set_dirty=1
+    Data    : word[0] = 100
+  Cycle 8 | COMPARE_TAG -> IDLE
+    Action  : Request complete, CPU unstalled
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : MISS  |  cycles=8  |  read_data=0  |  mem_read=1  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #2 : WRITE addr=0x00004000 data=200
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00004000 (16384)
+    Tag              : 0x1 (1)
+    Index            : 0
+    Byte Offset      : 0
+    Word Offset      : 0
+    Block Base Addr  : 0x4000
+  Cache line state before request:
+    valid=1  dirty=1  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x1  -> MISS
+    Action  : CACHE MISS — CPU stalled
+    Signals : cache_hit=0, cpu_stall=1
+    Branch  : Old block is DIRTY → must write back first
+  ------------------------------------------------------------------
+  Cycle 3-6 | WRITE_BACK
+    Action  : Writing dirty block to memory
+    Signals : mem_write=1, cpu_stall=1
+    Evict   : block addr=0x0 data=[100, 10, 20, 30]
+    Cycle 3 : memory_not_ready
+    Cycle 4 : memory_not_ready
+    Cycle 5 : memory_not_ready
+    Cycle 6 : memory_ready=1 — write-back complete
+  ------------------------------------------------------------------
+    Transition: WRITE_BACK -> ALLOCATE
+  ------------------------------------------------------------------
+  Cycle 7-10 | ALLOCATE
+    Action  : Fetching new block from memory
+    Signals : mem_read=1, cpu_stall=1
+    Fetch   : block base addr=0x4000
+    Cycle 7 : memory_not_ready
+    Cycle 8 : memory_not_ready
+    Cycle 9 : memory_not_ready
+    Cycle 10 : memory_ready=1 — allocation complete
+    Loaded  : [200, 210, 220, 230]
+  ------------------------------------------------------------------
+  Cycle 11 | ALLOCATE -> COMPARE_TAG
+    Action  : Re-evaluating after allocation
+    Action  : WRITE applied to newly fetched block
+    Signals : set_valid=1, set_tag=1, set_dirty=1
+    Data    : word[0] = 200
+  Cycle 12 | COMPARE_TAG -> IDLE
+    Action  : Request complete, CPU unstalled
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : MISS  |  cycles=12  |  read_data=0  |  mem_read=1  |  mem_write=1
+======================================================================
+
+======================================================================
+  Request #3 : READ  addr=0x00004000
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00004000 (16384)
+    Tag              : 0x1 (1)
+    Index            : 0
+    Byte Offset      : 0
+    Word Offset      : 0
+    Block Base Addr  : 0x4000
+  Cache line state before request:
+    valid=1  dirty=1  tag=0x1
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x1  req_tag=0x1  -> HIT
+    Action  : READ HIT — returning word from cache
+    Signals : cache_hit=1, cache_ready=1
+    Data    : word[0] = 200
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=200  |  mem_read=0  |  mem_write=0
+======================================================================
+
+**********************************************************************
+  PERFORMANCE STATISTICS
+**********************************************************************
+  Total Requests   : 3
+  Cache Hits       : 1
+  Cache Misses     : 2
+  Write-Backs      : 1
+  Hit  Rate        : 33.3%
+  Miss Rate        : 66.7%
+  Total Cycles     : 23
+  Avg Cycles/Req   : 7.7
+**********************************************************************
+
+
+######################################################################
+  SCENARIO : S6: Spatial Locality
+  PURPOSE  : Access all 4 words in same block sequentially.
+######################################################################
+
+======================================================================
+  Request #1 : READ  addr=0x00000000
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000000 (0)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 0
+    Word Offset      : 0
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=0  dirty=0  tag=0xffffffff
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=0  tag_in_cache=0xffffffff  req_tag=0x0  -> MISS
+    Action  : CACHE MISS — CPU stalled
+    Signals : cache_hit=0, cpu_stall=1
+    Branch  : Old block is CLEAN (or invalid) → go to ALLOCATE
+  ------------------------------------------------------------------
+  Cycle 3-6 | ALLOCATE
+    Action  : Fetching new block from memory
+    Signals : mem_read=1, cpu_stall=1
+    Fetch   : block base addr=0x0
+    Cycle 3 : memory_not_ready
+    Cycle 4 : memory_not_ready
+    Cycle 5 : memory_not_ready
+    Cycle 6 : memory_ready=1 — allocation complete
+    Loaded  : [0, 10, 20, 30]
+  ------------------------------------------------------------------
+  Cycle 7 | ALLOCATE -> COMPARE_TAG
+    Action  : Re-evaluating after allocation
+    Action  : READ data from newly fetched block
+    Signals : set_valid=1, set_tag=1
+    Data    : word[0] = 0
+  Cycle 8 | COMPARE_TAG -> IDLE
+    Action  : Request complete, CPU unstalled
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : MISS  |  cycles=8  |  read_data=0  |  mem_read=1  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #2 : READ  addr=0x00000004
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000004 (4)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 4
+    Word Offset      : 1
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=1  dirty=0  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x0  -> HIT
+    Action  : READ HIT — returning word from cache
+    Signals : cache_hit=1, cache_ready=1
+    Data    : word[1] = 10
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=10  |  mem_read=0  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #3 : READ  addr=0x00000008
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000008 (8)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 8
+    Word Offset      : 2
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=1  dirty=0  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x0  -> HIT
+    Action  : READ HIT — returning word from cache
+    Signals : cache_hit=1, cache_ready=1
+    Data    : word[2] = 20
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=20  |  mem_read=0  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #4 : READ  addr=0x0000000c
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x0000000c (12)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 12
+    Word Offset      : 3
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=1  dirty=0  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x0  -> HIT
+    Action  : READ HIT — returning word from cache
+    Signals : cache_hit=1, cache_ready=1
+    Data    : word[3] = 30
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=30  |  mem_read=0  |  mem_write=0
+======================================================================
+
+**********************************************************************
+  PERFORMANCE STATISTICS
+**********************************************************************
+  Total Requests   : 4
+  Cache Hits       : 3
+  Cache Misses     : 1
+  Write-Backs      : 0
+  Hit  Rate        : 75.0%
+  Miss Rate        : 25.0%
+  Total Cycles     : 17
+  Avg Cycles/Req   : 4.2
+**********************************************************************
+
+
+######################################################################
+  SCENARIO : S7: Mixed Read/Write Workload
+  PURPOSE  : Comprehensive mix covering hits, misses, dirty eviction.
+######################################################################
+
+======================================================================
+  Request #1 : READ  addr=0x00000000
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000000 (0)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 0
+    Word Offset      : 0
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=0  dirty=0  tag=0xffffffff
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=0  tag_in_cache=0xffffffff  req_tag=0x0  -> MISS
+    Action  : CACHE MISS — CPU stalled
+    Signals : cache_hit=0, cpu_stall=1
+    Branch  : Old block is CLEAN (or invalid) → go to ALLOCATE
+  ------------------------------------------------------------------
+  Cycle 3-6 | ALLOCATE
+    Action  : Fetching new block from memory
+    Signals : mem_read=1, cpu_stall=1
+    Fetch   : block base addr=0x0
+    Cycle 3 : memory_not_ready
+    Cycle 4 : memory_not_ready
+    Cycle 5 : memory_not_ready
+    Cycle 6 : memory_ready=1 — allocation complete
+    Loaded  : [0, 10, 20, 30]
+  ------------------------------------------------------------------
+  Cycle 7 | ALLOCATE -> COMPARE_TAG
+    Action  : Re-evaluating after allocation
+    Action  : READ data from newly fetched block
+    Signals : set_valid=1, set_tag=1
+    Data    : word[0] = 0
+  Cycle 8 | COMPARE_TAG -> IDLE
+    Action  : Request complete, CPU unstalled
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : MISS  |  cycles=8  |  read_data=0  |  mem_read=1  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #2 : WRITE addr=0x00000004 data=555
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000004 (4)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 4
+    Word Offset      : 1
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=1  dirty=0  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x0  -> HIT
+    Action  : WRITE HIT — updating cache word, marking dirty
+    Signals : cache_hit=1, cache_ready=1, dirty=1
+    Data    : word[1] 10 -> 555
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=0  |  mem_read=0  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #3 : READ  addr=0x00000008
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000008 (8)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 8
+    Word Offset      : 2
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=1  dirty=1  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x0  -> HIT
+    Action  : READ HIT — returning word from cache
+    Signals : cache_hit=1, cache_ready=1
+    Data    : word[2] = 20
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=20  |  mem_read=0  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #4 : WRITE addr=0x0000000c data=333
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x0000000c (12)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 12
+    Word Offset      : 3
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=1  dirty=1  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x0  -> HIT
+    Action  : WRITE HIT — updating cache word, marking dirty
+    Signals : cache_hit=1, cache_ready=1, dirty=1
+    Data    : word[3] 30 -> 333
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=0  |  mem_read=0  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #5 : READ  addr=0x00000004
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00000004 (4)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 4
+    Word Offset      : 1
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=1  dirty=1  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x0  -> HIT
+    Action  : READ HIT — returning word from cache
+    Signals : cache_hit=1, cache_ready=1
+    Data    : word[1] = 555
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=555  |  mem_read=0  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #6 : READ  addr=0x0000000c
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x0000000c (12)
+    Tag              : 0x0 (0)
+    Index            : 0
+    Byte Offset      : 12
+    Word Offset      : 3
+    Block Base Addr  : 0x0
+  Cache line state before request:
+    valid=1  dirty=1  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x0  -> HIT
+    Action  : READ HIT — returning word from cache
+    Signals : cache_hit=1, cache_ready=1
+    Data    : word[3] = 333
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=333  |  mem_read=0  |  mem_write=0
+======================================================================
+
+======================================================================
+  Request #7 : WRITE addr=0x00004000 data=888
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00004000 (16384)
+    Tag              : 0x1 (1)
+    Index            : 0
+    Byte Offset      : 0
+    Word Offset      : 0
+    Block Base Addr  : 0x4000
+  Cache line state before request:
+    valid=1  dirty=1  tag=0x0
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x0  req_tag=0x1  -> MISS
+    Action  : CACHE MISS — CPU stalled
+    Signals : cache_hit=0, cpu_stall=1
+    Branch  : Old block is DIRTY → must write back first
+  ------------------------------------------------------------------
+  Cycle 3-6 | WRITE_BACK
+    Action  : Writing dirty block to memory
+    Signals : mem_write=1, cpu_stall=1
+    Evict   : block addr=0x0 data=[0, 555, 20, 333]
+    Cycle 3 : memory_not_ready
+    Cycle 4 : memory_not_ready
+    Cycle 5 : memory_not_ready
+    Cycle 6 : memory_ready=1 — write-back complete
+  ------------------------------------------------------------------
+    Transition: WRITE_BACK -> ALLOCATE
+  ------------------------------------------------------------------
+  Cycle 7-10 | ALLOCATE
+    Action  : Fetching new block from memory
+    Signals : mem_read=1, cpu_stall=1
+    Fetch   : block base addr=0x4000
+    Cycle 7 : memory_not_ready
+    Cycle 8 : memory_not_ready
+    Cycle 9 : memory_not_ready
+    Cycle 10 : memory_ready=1 — allocation complete
+    Loaded  : [200, 210, 220, 230]
+  ------------------------------------------------------------------
+  Cycle 11 | ALLOCATE -> COMPARE_TAG
+    Action  : Re-evaluating after allocation
+    Action  : WRITE applied to newly fetched block
+    Signals : set_valid=1, set_tag=1, set_dirty=1
+    Data    : word[0] = 888
+  Cycle 12 | COMPARE_TAG -> IDLE
+    Action  : Request complete, CPU unstalled
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : MISS  |  cycles=12  |  read_data=0  |  mem_read=1  |  mem_write=1
+======================================================================
+
+======================================================================
+  Request #8 : READ  addr=0x00004000
+----------------------------------------------------------------------
+  Address decomposition (BYTE-ADDRESSED):
+    Byte address     : 0x00004000 (16384)
+    Tag              : 0x1 (1)
+    Index            : 0
+    Byte Offset      : 0
+    Word Offset      : 0
+    Block Base Addr  : 0x4000
+  Cache line state before request:
+    valid=1  dirty=1  tag=0x1
+----------------------------------------------------------------------
+  Cycle 1 | IDLE -> COMPARE_TAG
+    Action  : CPU request received, moving to tag comparison
+    Signals : cpu_stall=0, valid_cpu_request=1
+  Cycle 2 | COMPARE_TAG
+    Check   : valid=1  tag_in_cache=0x1  req_tag=0x1  -> HIT
+    Action  : READ HIT — returning word from cache
+    Signals : cache_hit=1, cache_ready=1
+    Data    : word[0] = 888
+  Cycle 3 | COMPARE_TAG -> IDLE
+    Action  : Cache ready, signalling done to CPU
+    Signals : done=1, cpu_stall=0, mark_cache_ready=1
+----------------------------------------------------------------------
+  RESULT  : HIT   |  cycles=3  |  read_data=888  |  mem_read=0  |  mem_write=0
+======================================================================
+
+**********************************************************************
+  PERFORMANCE STATISTICS
+**********************************************************************
+  Total Requests   : 8
+  Cache Hits       : 6
+  Cache Misses     : 2
+  Write-Backs      : 1
+  Hit  Rate        : 75.0%
+  Miss Rate        : 25.0%
+  Total Cycles     : 38
+  Avg Cycles/Req   : 4.8
+**********************************************************************
+
+======================================================================
+  Simulation complete.
+  Full log saved to: simulation_output.txt
+======================================================================
+
